@@ -1,0 +1,9 @@
+ultralytics
+opencv-python
+numpy
+torch
+torchvision
+facenet-pytorch
+streamlit
+streamlit-autorefresh
+bcrypt
