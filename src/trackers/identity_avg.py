@@ -1,3 +1,11 @@
+# src/trackers/identity_avg.py
+# K-of-N vote based identity stabilizer (works great for "don't let 1 lucky frame decide")
+#
+# Usage:
+#   decision = identity_avg.update(name, sim)
+#   if decision and decision.ready:
+#       print(decision.name, decision.avg_sim)
+
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Optional, Tuple
@@ -9,28 +17,50 @@ class IdentityDecision:
     ready: bool
     name: str
     avg_sim: float
+    votes: int
+    total: int
 
 
 class IdentityAverager:
     """
-    Stabilizes identity across a small window.
+    Stabilizes identity across a rolling time window using K-of-N votes.
 
-    Key changes:
-    - Unknown is treated as "no vote" (doesn't reset the buffer)
-    - Name changes reset ONLY when the new name is a real identity
+    - Unknown is ignored (no vote)
+    - We collect (t, name, sim) samples for a window (window_sec)
+    - Decision triggers when:
+        * enough samples exist (min_samples)
+        * top_name has votes >= k_votes
+        * avg_sim(top_name) >= min_avg_sim
+        * optional cooldown is respected
+    - When a decision triggers, internal buffer resets (so it can decide again later)
     """
-    def __init__(self, window_sec: float = 2.0, min_avg_sim: float = 0.68, cooldown_sec: float = 10.0):
+
+    def __init__(
+        self,
+        window_sec: float = 2.0,
+        min_avg_sim: float = 0.78,
+        cooldown_sec: float = 10.0,
+        min_samples: int = 8,
+        k_votes: int = 6,
+        require_consecutive: bool = False,
+    ):
         self.window_sec = float(window_sec)
         self.min_avg_sim = float(min_avg_sim)
         self.cooldown_sec = float(cooldown_sec)
 
-        self.current_name: Optional[str] = None
-        self.buf: Deque[Tuple[float, float]] = deque()
+        self.min_samples = int(min_samples)
+        self.k_votes = int(k_votes)
+        self.require_consecutive = bool(require_consecutive)
+
+        self.buf: Deque[Tuple[float, str, float]] = deque()
         self.last_decision_t = 0.0
 
     def reset(self):
-        self.current_name = None
         self.buf.clear()
+
+    def _prune(self, now: float):
+        while self.buf and (now - self.buf[0][0]) > self.window_sec:
+            self.buf.popleft()
 
     def update(self, name: str, sim: float) -> Optional[IdentityDecision]:
         now = time.time()
@@ -40,37 +70,44 @@ class IdentityAverager:
             return None
 
         # Ignore Unknown as "no vote"
-        if name == "Unknown":
-            # keep buffer; do not reset
+        if not name or name == "Unknown":
+            self._prune(now)
             return None
 
-        if self.current_name is None:
-            self.current_name = name
-            self.buf.clear()
+        # Add sample, prune old
+        self.buf.append((now, name, float(sim)))
+        self._prune(now)
 
-        # Only reset when flipping between two real names
-        if name != self.current_name:
-            self.current_name = name
-            self.buf.clear()
+        # Need enough samples in window
+        if len(self.buf) < self.min_samples:
+            return IdentityDecision(False, name, float(sim), votes=0, total=len(self.buf))
 
-        self.buf.append((now, sim))
-        while self.buf and (now - self.buf[0][0]) > self.window_sec:
-            self.buf.popleft()
+        # Count votes + sims per identity
+        counts = {}
+        sim_sums = {}
+        sim_counts = {}
 
-        if not self.buf:
-            return None
+        for _, nm, s in self.buf:
+            counts[nm] = counts.get(nm, 0) + 1
+            sim_sums[nm] = sim_sums.get(nm, 0.0) + s
+            sim_counts[nm] = sim_counts.get(nm, 0) + 1
 
-        # require enough window coverage
-        if (now - self.buf[0][0]) < (0.9 * self.window_sec):
-            avg_sim = sum(x[1] for x in self.buf) / len(self.buf)
-            return IdentityDecision(False, self.current_name, avg_sim)
+        # pick top voted identity
+        top_name = max(counts.items(), key=lambda kv: kv[1])[0]
+        top_votes = counts[top_name]
+        top_avg_sim = sim_sums[top_name] / max(1, sim_counts[top_name])
 
-        avg_sim = sum(x[1] for x in self.buf) / len(self.buf)
+        # Optional: require last K samples to all be the same identity (extra strict)
+        if self.require_consecutive:
+            last_k = list(self.buf)[-self.k_votes:]
+            if any(nm != top_name for _, nm, _ in last_k):
+                return IdentityDecision(False, top_name, top_avg_sim, votes=top_votes, total=len(self.buf))
 
-        if avg_sim >= self.min_avg_sim:
+        # Decision condition
+        if top_votes >= self.k_votes and top_avg_sim >= self.min_avg_sim:
             self.last_decision_t = now
-            decided_name = self.current_name
+            decision = IdentityDecision(True, top_name, top_avg_sim, votes=top_votes, total=len(self.buf))
             self.reset()
-            return IdentityDecision(True, decided_name, avg_sim)
+            return decision
 
-        return IdentityDecision(False, self.current_name, avg_sim)
+        return IdentityDecision(False, top_name, top_avg_sim, votes=top_votes, total=len(self.buf))

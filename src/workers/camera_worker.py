@@ -97,9 +97,12 @@ class CameraWorker(threading.Thread):
         )
         self.unknown_avg = UnknownAverager(cfg.unknown_avg_window_sec, cfg.unknown_avg_cooldown_sec)
         self.identity_avg = IdentityAverager(
-            cfg.attendance_avg_window_sec,
-            cfg.attendance_min_avg_sim,
-            cfg.attendance_update_cooldown_sec,
+            window_sec=cfg.attendance_avg_window_sec,
+            min_avg_sim=cfg.attendance_min_avg_sim,
+            cooldown_sec=cfg.attendance_update_cooldown_sec,
+            min_samples=getattr(cfg, "attendance_min_samples", 8),
+            k_votes=getattr(cfg, "attendance_k_votes", 6),
+            require_consecutive=getattr(cfg, "attendance_require_consecutive", False),
         )
 
         # tailgate/occlusion timers
@@ -223,14 +226,7 @@ class CameraWorker(threading.Thread):
             # ---------- (D) Face recognition with new args + valid faces ----------
             dets = []
             if persons > 0:
-                dets = self.recognizer.recognize(
-                    frame,
-                    sim_threshold=self.cfg.sim_threshold,
-                    sim_margin=self.cfg.sim_margin,
-                    min_face_prob=self.cfg.min_face_prob,
-                    min_face_w=self.cfg.min_face_w,
-                    min_face_h=self.cfg.min_face_h,
-                )
+                dets = self.recognizer.recognize(frame, self.cfg)
 
             faces = len(dets)
             valid_faces = [m for m in dets if inside_ratio(m.bbox, SAFE) >= self.cfg.min_inside_ratio]
