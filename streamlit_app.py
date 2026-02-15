@@ -27,7 +27,7 @@ from src.db.queries import (
 # ---------------------------
 # Paths / config
 # ---------------------------
-DB_PATH = "data/logs/logs.db"
+DB_PATH = "data/logs/log.db"
 GUESTS_ROOT = "data/guests"
 RELOAD_FLAG = os.path.join(GUESTS_ROOT, "_reload.flag")
 

@@ -6,8 +6,8 @@ from src.workers.camera_worker import CameraWorker
 def main():
     cfg = Config(
         # put your real IP Webcam URLs here
-        entry_url="http://10.120.254.101:8080/video",
-        exit_url="http://100.71.144.57:5000/video",
+        entry_url="http://10.191.222.104:8080/video",
+        exit_url="http://100.91.156.215:5000/video",
     )
 
     init_db(cfg.log_db_path)

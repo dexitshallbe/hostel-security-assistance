@@ -4,6 +4,9 @@ import os
 
 @dataclass
 class Config:
+    
+    entry_url: str = ""
+    exit_url: str = ""
 
     # --------------------------------------------------
     # Paths
