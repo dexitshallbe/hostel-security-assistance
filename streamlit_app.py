@@ -16,6 +16,7 @@ import bcrypt
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
+from src.config import Config
 from src.db.schema import init_db
 from src.db.queries import (
     get_open_alerts,
@@ -27,9 +28,10 @@ from src.db.queries import (
 # ---------------------------
 # Paths / config
 # ---------------------------
-DB_PATH = "data/logs/log.db"
-GUESTS_ROOT = "data/guests"
-RELOAD_FLAG = os.path.join(GUESTS_ROOT, "_reload.flag")
+CFG = Config()
+DB_PATH = CFG.log_db_path
+GUESTS_ROOT = CFG.guests_dir
+RELOAD_FLAG = CFG.guests_reload_flag
 
 # ---------------------------
 # LAN-only demo auth config
@@ -50,6 +52,7 @@ AUTO_REFRESH_MS = 2000
 
 def touch_reload_flag():
     os.makedirs(GUESTS_ROOT, exist_ok=True)
+    os.makedirs(os.path.dirname(RELOAD_FLAG), exist_ok=True)
     with open(RELOAD_FLAG, "a") as f:
         f.write("")
     os.utime(RELOAD_FLAG, None)
