@@ -225,19 +225,21 @@ def render_logs():
             st.write(f"{ts} [{level}] {msg}")
 
 
-def render_guest_upload():
-    st.subheader("Temporary Guest Access")
+import subprocess
+import shutil
 
+def render_guest_upload():
+    st.subheader("Temporary Guest Access (Video)")
     st.caption(
-        "Upload face images for a temporary guest. Access expires automatically after the chosen duration. "
-        "Worker will reload the guest DB when this is added."
+        "Upload a short face-pose video for a temporary guest. "
+        "We’ll extract face crops automatically and grant access for the chosen duration."
     )
 
     with st.form("guest_form"):
         guest_name = st.text_input("Guest name")
         hours = st.number_input("Access duration (hours)", min_value=1, max_value=168, value=24)
-        files = st.file_uploader(
-            "Upload face images (jpg/png)", type=["jpg", "jpeg", "png"], accept_multiple_files=True
+        video = st.file_uploader(
+            "Upload pose video (mp4/mov/avi/mkv)", type=["mp4", "mov", "avi", "mkv"], accept_multiple_files=False
         )
         submitted = st.form_submit_button("Add guest")
 
@@ -247,27 +249,71 @@ def render_guest_upload():
     if not guest_name:
         st.error("Guest name is required.")
         return
-    if not files:
-        st.error("Upload at least one face image.")
+    if video is None:
+        st.error("Upload a video file.")
+        return
+
+    # Basic name sanitization to avoid weird folder names
+    safe_name = "".join(c for c in guest_name.strip() if c.isalnum() or c in ("_", "-", " ")).strip().replace(" ", "_")
+    if not safe_name:
+        st.error("Guest name contains no usable characters.")
         return
 
     gid = str(uuid.uuid4())[:8]
-    folder_name = f"{guest_name}__{gid}"
-    folder_path = os.path.join(GUESTS_ROOT, folder_name)
-    os.makedirs(folder_path, exist_ok=True)
+    folder_name = f"{safe_name}__{gid}"
 
-    # Save images
-    saved = 0
-    for i, f in enumerate(files):
-        out_path = os.path.join(folder_path, f"{i+1}_{f.name}")
-        with open(out_path, "wb") as out:
-            out.write(f.getbuffer())
-        saved += 1
+    # Final destination (faces)
+    final_folder = os.path.join(GUESTS_ROOT, folder_name)
+    os.makedirs(final_folder, exist_ok=True)
+
+    # Temp folder for video
+    tmp_root = os.path.join(GUESTS_ROOT, "_tmp")
+    tmp_folder = os.path.join(tmp_root, folder_name)
+    os.makedirs(tmp_folder, exist_ok=True)
+
+    video_path = os.path.join(tmp_folder, f"pose_video_{gid}.mp4")
+    with open(video_path, "wb") as out:
+        out.write(video.getbuffer())
+
+    # Run extraction (call your script)
+    # If your extractor is in same repo: extract_face_frames.py
+    # Tune args as you like
+    cmd = [
+        "python", "extract_face_frames.py",
+        video_path,
+        "--out", final_folder,
+        "--every", "3",
+        "--max", "60",
+        "--min_prob", "0.80",
+        "--min_dist", "0.50",
+        "--blur", "30",
+    ]
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        add_log(DB_PATH, "INFO", f"Guest video processed: {guest_name} id={gid}. extractor_ok.")
+    except subprocess.CalledProcessError as e:
+        # Cleanup partial folder if extraction failed
+        shutil.rmtree(final_folder, ignore_errors=True)
+        add_log(DB_PATH, "ERROR", f"Guest video processing failed: {guest_name} id={gid}. {e.stderr[:300]}")
+        st.error("Video processing failed. Check logs.")
+        st.code(e.stderr or e.stdout)
+        return
+    finally:
+        # Always delete temp video folder
+        shutil.rmtree(tmp_folder, ignore_errors=True)
+
+    # Count how many face images were produced
+    produced = [p for p in os.listdir(final_folder) if p.lower().endswith((".jpg", ".jpeg", ".png"))]
+    if len(produced) == 0:
+        shutil.rmtree(final_folder, ignore_errors=True)
+        add_log(DB_PATH, "WARN", f"No faces extracted for guest: {guest_name} id={gid}")
+        st.error("No faces could be extracted from the video. Try a clearer/closer video.")
+        return
 
     created = datetime.now()
     expires = created + timedelta(hours=int(hours))
 
-    os.makedirs(GUESTS_ROOT, exist_ok=True)
     with sqlite3.connect(DB_PATH) as con:
         con.execute("""
         INSERT INTO guest_access(guest_id, name, created_ts, expires_ts, folder_path)
@@ -277,15 +323,15 @@ def render_guest_upload():
             guest_name,
             created.isoformat(timespec="seconds"),
             expires.isoformat(timespec="seconds"),
-            folder_path
+            final_folder
         ))
 
-    # Notify worker to reload
     touch_reload_flag()
-    add_log(DB_PATH, "INFO", f"Guest added: {guest_name} id={gid} images={saved} expires={expires.isoformat(timespec='seconds')}")
+    add_log(DB_PATH, "INFO", f"Guest added: {guest_name} id={gid} faces={len(produced)} expires={expires.isoformat(timespec='seconds')}")
 
-    st.success(f"Guest '{guest_name}' added for {hours} hour(s). (id={gid})")
+    st.success(f"Guest '{guest_name}' added for {hours} hour(s). Faces extracted: {len(produced)} (id={gid})")
     st.rerun()
+
 
 
 def main():

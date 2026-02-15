@@ -154,9 +154,10 @@ class CameraWorker(threading.Thread):
 
     def _maybe_reload_db(self):
         mt = self._get_reload_mtime()
-        if mt > self._reload_mtime:
+        if mt != self._reload_mtime:
             self._reload_mtime = mt
             self._db_build()
+
 
     def _cooldown_ok(self, alert_type: str) -> bool:
         cd = float(self.cfg.alert_cooldowns.get(alert_type, 20.0))
