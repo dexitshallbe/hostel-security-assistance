@@ -51,41 +51,6 @@ LOCKOUT_MINUTES = 10
 # Auto refresh dashboard every N ms
 AUTO_REFRESH_MS = 2000
 
-THEMES = {
-    "White": {
-        "bg": "#FFFFFF",
-        "text": "#111827",
-        "sidebar_bg": "#F8FAFC",
-        "panel_bg": "#FFFFFF",
-        "accent": "#2563EB",
-        "muted": "#E5E7EB",
-    },
-    "Dark": {
-        "bg": "#0E1117",
-        "text": "#E5E7EB",
-        "sidebar_bg": "#111827",
-        "panel_bg": "#1F2937",
-        "accent": "#60A5FA",
-        "muted": "#374151",
-    },
-    "Blue": {
-        "bg": "#EFF6FF",
-        "text": "#0F172A",
-        "sidebar_bg": "#DBEAFE",
-        "panel_bg": "#FFFFFF",
-        "accent": "#2563EB",
-        "muted": "#BFDBFE",
-    },
-    "Pink": {
-        "bg": "#FFF1F2",
-        "text": "#4C0519",
-        "sidebar_bg": "#FFE4E6",
-        "panel_bg": "#FFFFFF",
-        "accent": "#DB2777",
-        "muted": "#FBCFE8",
-    },
-}
-
 PAGE_OPTIONS = ["Alerts", "Real-time Log", "Temp Guest Upload"]
 
 
@@ -104,8 +69,6 @@ def _init_session():
         st.session_state.fail_count = 0
     if "locked_until" not in st.session_state:
         st.session_state.locked_until = None
-    if "theme" not in st.session_state:
-        st.session_state.theme = "Dark"
     if "selected_page" not in st.session_state:
         st.session_state.selected_page = "Alerts"
 
@@ -123,39 +86,6 @@ def _lock_remaining_minutes() -> int:
         return 0
     seconds = (locked_until - datetime.now()).total_seconds()
     return max(0, int(seconds // 60) + 1)
-
-
-def apply_theme():
-    theme_name = st.session_state.get("theme", "Dark")
-    theme = THEMES.get(theme_name, THEMES["Dark"])
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-color: {theme['bg']};
-            color: {theme['text']};
-        }}
-        section[data-testid="stSidebar"] {{
-            background-color: {theme['sidebar_bg']};
-        }}
-        div[data-testid="stVerticalBlock"] div[data-testid="stVerticalBlockBorderWrapper"] {{
-            background-color: {theme['panel_bg']};
-            border-color: {theme['muted']};
-            border-radius: 0.5rem;
-        }}
-        .stButton > button,
-        .stDownloadButton > button {{
-            border-color: {theme['accent']};
-        }}
-        .stButton > button:hover,
-        .stDownloadButton > button:hover {{
-            color: {theme['text']};
-            border-color: {theme['accent']};
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def check_login() -> bool:
@@ -216,12 +146,6 @@ def render_sidebar():
     with st.sidebar:
         st.write("✅ Logged in")
         st.caption("LAN-only mode (bcrypt + lockout)")
-
-        st.session_state.theme = st.selectbox(
-            "Theme",
-            list(THEMES.keys()),
-            index=list(THEMES.keys()).index(st.session_state.get("theme", "Dark")),
-        )
 
         st.session_state.selected_page = st.radio(
             "Navigation",
@@ -433,6 +357,32 @@ def render_selected_page():
         st.caption("No live camera feed shown. Manage temporary guest uploads.")
         render_guest_upload()
 
+def apply_ui_polish():
+    st.markdown(
+        """
+        <style>
+        /* Add clean spacing */
+        .block-container {
+            padding-top: 1.5rem;
+            padding-bottom: 2rem;
+            max-width: 1200px;
+        }
+
+        /* Slightly nicer cards */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius: 14px !important;
+        }
+
+        /* Buttons slightly rounded */
+        .stButton > button,
+        .stDownloadButton > button {
+            border-radius: 12px !important;
+            font-weight: 600;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 def main():
     st.set_page_config(page_title="Hostel Security", layout="wide")
@@ -441,7 +391,6 @@ def main():
     init_db(DB_PATH)
 
     _init_session()
-    apply_theme()
 
     # Login gate
     if not check_login():
@@ -453,6 +402,9 @@ def main():
     st_autorefresh(interval=AUTO_REFRESH_MS, key="dash_refresh")
 
     render_selected_page()
+    
+    apply_ui_polish()
+
 
 
 if __name__ == "__main__":
