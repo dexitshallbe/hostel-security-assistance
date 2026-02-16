@@ -8,18 +8,22 @@
 # - temporary guest upload with expiry (hours) + worker reload flag
 
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
 import uuid
 from datetime import datetime, timedelta
+from typing import Optional, Tuple
 
 import bcrypt
+import cv2
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from src.config import Config
 from src.db.queries import (
+    add_entry_decision,
     add_log,
     get_open_alerts,
     get_recent_logs,
@@ -71,6 +75,20 @@ def _init_session():
         st.session_state.locked_until = None
     if "selected_page" not in st.session_state:
         st.session_state.selected_page = "Alerts"
+    if "active_alert_id" not in st.session_state:
+        st.session_state.active_alert_id = None
+    if "deal_step" not in st.session_state:
+        st.session_state.deal_step = None
+    if "deal_submit_inflight" not in st.session_state:
+        st.session_state.deal_submit_inflight = False
+    if "granted_name_for_guest" not in st.session_state:
+        st.session_state.granted_name_for_guest = ""
+
+
+def _reset_deal_flow():
+    st.session_state.active_alert_id = None
+    st.session_state.deal_step = None
+    st.session_state.deal_submit_inflight = False
 
 
 def _is_locked() -> bool:
@@ -161,8 +179,87 @@ def render_sidebar():
             st.rerun()
 
 
+def _extract_bbox_from_message(message: Optional[str]) -> Optional[Tuple[int, int, int, int]]:
+    if not message:
+        return None
+
+    # Accepts patterns like "bbox=(x1,y1,x2,y2)" / "bbox:[x1, y1, x2, y2]"
+    m = re.search(r"bbox\s*[:=]\s*[\[(]?\s*(-?\d+)\D+(-?\d+)\D+(-?\d+)\D+(-?\d+)", message, re.IGNORECASE)
+    if not m:
+        return None
+
+    try:
+        x1, y1, x2, y2 = (int(m.group(i)) for i in range(1, 5))
+        if x2 > x1 and y2 > y1:
+            return x1, y1, x2, y2
+    except Exception:
+        return None
+    return None
+
+
+def _annotate_image(frame_bgr, bbox: Optional[Tuple[int, int, int, int]], text: str, color=(0, 255, 255)):
+    out = frame_bgr.copy()
+    if bbox is not None:
+        x1, y1, x2, y2 = bbox
+        cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(out, text, (x1, max(20, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+    else:
+        cv2.putText(out, text, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+    return out
+
+
+def _save_granted_annotated_snapshot(alert: dict, granted_name: str) -> str:
+    evidence_path = alert.get("evidence_path")
+    if not evidence_path or not os.path.exists(evidence_path):
+        raise FileNotFoundError("Evidence image for alert is missing on disk.")
+
+    frame = cv2.imread(evidence_path)
+    if frame is None:
+        raise ValueError("Could not read evidence image for annotation.")
+
+    bbox = _extract_bbox_from_message(alert.get("message"))
+    label = f"ENTRY_GRANTED {granted_name}".strip()
+    ann = _annotate_image(frame, bbox, label)
+
+    out_dir = os.path.join(CFG.log_images_dir, "granted")
+    os.makedirs(out_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(out_dir, f"alert_{int(alert['id'])}_entry_granted_{ts}_ann.jpg")
+    cv2.imwrite(out_path, ann)
+    return out_path
+
+
+def _resolve_entry_denied(alert_id: int):
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("BEGIN")
+        con.execute("UPDATE alerts SET status=?, false_alert=? WHERE id=?", ("dealt", 0, int(alert_id)))
+        add_entry_decision(con=con, alert_id=int(alert_id), decision="ENTRY_DENIED")
+        con.commit()
+
+
+def _resolve_entry_granted(alert: dict, name: str, contact: str, address: str, reason: str, notes: str):
+    image_path = _save_granted_annotated_snapshot(alert, name)
+
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute("BEGIN")
+        add_entry_decision(
+            con=con,
+            alert_id=int(alert["id"]),
+            decision="ENTRY_GRANTED",
+            name=name,
+            contact=contact or None,
+            address=address or None,
+            reason=reason or None,
+            notes=notes or None,
+            image_path=image_path,
+        )
+        con.execute("UPDATE alerts SET status=?, false_alert=? WHERE id=?", ("dealt", 0, int(alert["id"])))
+        con.commit()
+
+
 def render_alerts():
     st.subheader("Real-time Alerts (Open)")
+    st.caption("Dealt flow: choose Entry denied or Entry granted. Entry granted requires visitor details.")
     alerts = get_open_alerts(DB_PATH, limit=30)
 
     if not alerts:
@@ -208,11 +305,94 @@ def render_alerts():
                 add_log(DB_PATH, "INFO", f"Alert {a['id']} ignored (false_alert=1)")
                 st.rerun()
 
-            # Dealt => resolved
+            # Dealt => branch to entry resolution chooser
             if c2.button("Dealt", key=f"deal_{a['id']}"):
-                update_alert_status(DB_PATH, int(a["id"]), status="dealt", false_alert=0)
-                add_log(DB_PATH, "INFO", f"Alert {a['id']} marked dealt")
+                st.session_state.active_alert_id = int(a["id"])
+                st.session_state.deal_step = "choose_resolution"
                 st.rerun()
+
+            active_here = st.session_state.get("active_alert_id") == int(a["id"])
+            step = st.session_state.get("deal_step") if active_here else None
+            inflight = st.session_state.get("deal_submit_inflight", False)
+
+            if step == "choose_resolution":
+                st.info("Select final resolution for this alert.")
+                rc1, rc2, rc3 = st.columns(3)
+
+                if rc1.button("Entry denied", key=f"entry_denied_{a['id']}", disabled=inflight):
+                    st.session_state.deal_submit_inflight = True
+                    try:
+                        _resolve_entry_denied(int(a["id"]))
+                        add_log(DB_PATH, "INFO", f"Alert {a['id']} resolved as ENTRY_DENIED")
+                        _reset_deal_flow()
+                        st.success("Alert resolved: ENTRY_DENIED")
+                    except Exception as e:
+                        st.error(f"Failed to save ENTRY_DENIED decision: {e}")
+                        st.session_state.deal_submit_inflight = False
+                    st.rerun()
+
+                if rc2.button("Entry granted", key=f"entry_granted_{a['id']}", disabled=inflight):
+                    st.session_state.deal_step = "granted_form"
+                    st.rerun()
+
+                if rc3.button("Cancel", key=f"cancel_resolution_{a['id']}"):
+                    _reset_deal_flow()
+                    st.rerun()
+
+            if step == "granted_form":
+                with st.expander("Entry granted details", expanded=True):
+                    st.caption("Name is required. Reason is optional but recommended.")
+                    with st.form(f"entry_granted_form_{a['id']}"):
+                        v_name = st.text_input("Name *", key=f"grant_name_{a['id']}")
+                        v_contact = st.text_input("Contact", key=f"grant_contact_{a['id']}")
+                        v_address = st.text_area("Address", key=f"grant_address_{a['id']}")
+                        v_reason = st.text_area("Reason for entry", key=f"grant_reason_{a['id']}")
+                        v_notes = st.text_area("Notes", key=f"grant_notes_{a['id']}")
+                        gc1, gc2 = st.columns(2)
+                        submit = gc1.form_submit_button("Save entry granted", disabled=inflight)
+                        cancel = gc2.form_submit_button("Cancel")
+
+                    if cancel:
+                        _reset_deal_flow()
+                        st.rerun()
+
+                    if submit:
+                        if not (v_name or "").strip():
+                            st.error("Name is required for Entry granted.")
+                        else:
+                            st.session_state.deal_submit_inflight = True
+                            try:
+                                _resolve_entry_granted(
+                                    alert=a,
+                                    name=v_name.strip(),
+                                    contact=v_contact.strip(),
+                                    address=v_address.strip(),
+                                    reason=v_reason.strip(),
+                                    notes=v_notes.strip(),
+                                )
+                                add_log(DB_PATH, "INFO", f"Alert {a['id']} resolved as ENTRY_GRANTED for {v_name.strip()}")
+                                st.session_state.granted_name_for_guest = v_name.strip()
+                                st.session_state.deal_step = "guest_prompt"
+                                st.session_state.deal_submit_inflight = False
+                                st.rerun()
+                            except Exception as e:
+                                st.session_state.deal_submit_inflight = False
+                                st.error(f"Failed to save Entry granted details: {e}")
+
+            if step == "guest_prompt":
+                st.success("Entry granted saved successfully.")
+                st.write("Add this person as a guest for faster recognition next time?")
+                pc1, pc2 = st.columns(2)
+
+                if pc1.button("Yes", key=f"guest_yes_{a['id']}"):
+                    st.session_state.prefill_guest_name = st.session_state.get("granted_name_for_guest", "")
+                    st.session_state.selected_page = "Temp Guest Upload"
+                    _reset_deal_flow()
+                    st.rerun()
+
+                if pc2.button("No", key=f"guest_no_{a['id']}"):
+                    _reset_deal_flow()
+                    st.rerun()
 
 
 def render_logs():
@@ -244,8 +424,11 @@ def render_guest_upload():
         "We’ll extract face crops automatically and grant access for the chosen duration."
     )
 
+    if st.session_state.get("prefill_guest_name") and "guest_name_input" not in st.session_state:
+        st.session_state.guest_name_input = st.session_state.prefill_guest_name
+
     with st.form("guest_form"):
-        guest_name = st.text_input("Guest name")
+        guest_name = st.text_input("Guest name", key="guest_name_input")
         hours = st.number_input("Access duration (hours)", min_value=1, max_value=168, value=24)
         video = st.file_uploader(
             "Upload pose video (mp4/mov/avi/mkv)", type=["mp4", "mov", "avi", "mkv"], accept_multiple_files=False
@@ -338,6 +521,7 @@ def render_guest_upload():
     touch_reload_flag()
     add_log(DB_PATH, "INFO", f"Guest added: {guest_name} id={gid} faces={len(produced)} expires={expires.isoformat(timespec='seconds')}")
 
+    st.session_state.pop("prefill_guest_name", None)
     st.success(f"Guest '{guest_name}' added for {hours} hour(s). Faces extracted: {len(produced)} (id={gid})")
     st.rerun()
 
@@ -356,6 +540,7 @@ def render_selected_page():
         st.title("Hostel Security Dashboard")
         st.caption("No live camera feed shown. Manage temporary guest uploads.")
         render_guest_upload()
+
 
 def apply_ui_polish():
     st.markdown(
@@ -384,6 +569,7 @@ def apply_ui_polish():
         unsafe_allow_html=True,
     )
 
+
 def main():
     st.set_page_config(page_title="Hostel Security", layout="wide")
 
@@ -402,9 +588,8 @@ def main():
     st_autorefresh(interval=AUTO_REFRESH_MS, key="dash_refresh")
 
     render_selected_page()
-    
-    apply_ui_polish()
 
+    apply_ui_polish()
 
 
 if __name__ == "__main__":

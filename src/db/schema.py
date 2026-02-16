@@ -75,5 +75,22 @@ def init_db(db_path: str):
     )
     """)
 
+    # Operator entry decisions linked to alerts
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS entry_decisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        alert_id INTEGER NOT NULL,
+        decision TEXT NOT NULL,                 -- ENTRY_GRANTED / ENTRY_DENIED
+        name TEXT,
+        contact TEXT,
+        address TEXT,
+        reason TEXT,
+        notes TEXT,
+        image_path TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(alert_id) REFERENCES alerts(id)
+    )
+    """)
+
     con.commit()
     con.close()

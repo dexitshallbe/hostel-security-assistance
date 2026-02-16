@@ -29,6 +29,29 @@ def update_alert_status(db_path: str, alert_id: int, status: str, false_alert: i
         con.execute("UPDATE alerts SET status=?, false_alert=? WHERE id=?", (status, false_alert, alert_id))
 
 
+def add_entry_decision(
+    con: sqlite3.Connection,
+    alert_id: int,
+    decision: str,
+    name: str = None,
+    contact: str = None,
+    address: str = None,
+    reason: str = None,
+    notes: str = None,
+    image_path: str = None,
+):
+    cur = con.execute(
+        """
+        INSERT INTO entry_decisions(
+            alert_id, decision, name, contact, address, reason, notes, image_path, created_at
+        )
+        VALUES(?,?,?,?,?,?,?,?,?)
+        """,
+        (alert_id, decision, name, contact, address, reason, notes, image_path, now_iso()),
+    )
+    return cur.lastrowid
+
+
 def get_open_alerts(db_path: str, limit: int = 20):
     with sqlite3.connect(db_path) as con:
         con.row_factory = sqlite3.Row
