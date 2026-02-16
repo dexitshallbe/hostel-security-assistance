@@ -8,8 +8,10 @@
 # - temporary guest upload with expiry (hours) + worker reload flag
 
 import os
-import uuid
+import shutil
 import sqlite3
+import subprocess
+import uuid
 from datetime import datetime, timedelta
 
 import bcrypt
@@ -17,13 +19,13 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 from src.config import Config
-from src.db.schema import init_db
 from src.db.queries import (
+    add_log,
     get_open_alerts,
     get_recent_logs,
     update_alert_status,
-    add_log,
 )
+from src.db.schema import init_db
 
 # ---------------------------
 # Paths / config
@@ -49,6 +51,43 @@ LOCKOUT_MINUTES = 10
 # Auto refresh dashboard every N ms
 AUTO_REFRESH_MS = 2000
 
+THEMES = {
+    "White": {
+        "bg": "#FFFFFF",
+        "text": "#111827",
+        "sidebar_bg": "#F8FAFC",
+        "panel_bg": "#FFFFFF",
+        "accent": "#2563EB",
+        "muted": "#E5E7EB",
+    },
+    "Dark": {
+        "bg": "#0E1117",
+        "text": "#E5E7EB",
+        "sidebar_bg": "#111827",
+        "panel_bg": "#1F2937",
+        "accent": "#60A5FA",
+        "muted": "#374151",
+    },
+    "Blue": {
+        "bg": "#EFF6FF",
+        "text": "#0F172A",
+        "sidebar_bg": "#DBEAFE",
+        "panel_bg": "#FFFFFF",
+        "accent": "#2563EB",
+        "muted": "#BFDBFE",
+    },
+    "Pink": {
+        "bg": "#FFF1F2",
+        "text": "#4C0519",
+        "sidebar_bg": "#FFE4E6",
+        "panel_bg": "#FFFFFF",
+        "accent": "#DB2777",
+        "muted": "#FBCFE8",
+    },
+}
+
+PAGE_OPTIONS = ["Alerts", "Real-time Log", "Temp Guest Upload"]
+
 
 def touch_reload_flag():
     os.makedirs(GUESTS_ROOT, exist_ok=True)
@@ -65,6 +104,10 @@ def _init_session():
         st.session_state.fail_count = 0
     if "locked_until" not in st.session_state:
         st.session_state.locked_until = None
+    if "theme" not in st.session_state:
+        st.session_state.theme = "Dark"
+    if "selected_page" not in st.session_state:
+        st.session_state.selected_page = "Alerts"
 
 
 def _is_locked() -> bool:
@@ -80,6 +123,39 @@ def _lock_remaining_minutes() -> int:
         return 0
     seconds = (locked_until - datetime.now()).total_seconds()
     return max(0, int(seconds // 60) + 1)
+
+
+def apply_theme():
+    theme_name = st.session_state.get("theme", "Dark")
+    theme = THEMES.get(theme_name, THEMES["Dark"])
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-color: {theme['bg']};
+            color: {theme['text']};
+        }}
+        section[data-testid="stSidebar"] {{
+            background-color: {theme['sidebar_bg']};
+        }}
+        div[data-testid="stVerticalBlock"] div[data-testid="stVerticalBlockBorderWrapper"] {{
+            background-color: {theme['panel_bg']};
+            border-color: {theme['muted']};
+            border-radius: 0.5rem;
+        }}
+        .stButton > button,
+        .stDownloadButton > button {{
+            border-color: {theme['accent']};
+        }}
+        .stButton > button:hover,
+        .stDownloadButton > button:hover {{
+            color: {theme['text']};
+            border-color: {theme['accent']};
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def check_login() -> bool:
@@ -107,7 +183,7 @@ def check_login() -> bool:
         )
 
     if st.button("Login"):
-        ok_user = (u == DEMO_USER)
+        ok_user = u == DEMO_USER
         ok_pass = False
         if ok_user:
             try:
@@ -119,6 +195,7 @@ def check_login() -> bool:
             st.session_state.authed = True
             st.session_state.fail_count = 0
             st.session_state.locked_until = None
+            st.session_state.selected_page = "Alerts"
             add_log(DB_PATH, "INFO", "Dashboard login successful")
             st.rerun()
         else:
@@ -140,7 +217,18 @@ def render_sidebar():
         st.write("✅ Logged in")
         st.caption("LAN-only mode (bcrypt + lockout)")
 
-        # Optional: show where DB lives
+        st.session_state.theme = st.selectbox(
+            "Theme",
+            list(THEMES.keys()),
+            index=list(THEMES.keys()).index(st.session_state.get("theme", "Dark")),
+        )
+
+        st.session_state.selected_page = st.radio(
+            "Navigation",
+            PAGE_OPTIONS,
+            index=PAGE_OPTIONS.index(st.session_state.get("selected_page", "Alerts")),
+        )
+
         st.code(DB_PATH)
 
         if st.button("Logout"):
@@ -225,9 +313,6 @@ def render_logs():
             st.write(f"{ts} [{level}] {msg}")
 
 
-import subprocess
-import shutil
-
 def render_guest_upload():
     st.subheader("Temporary Guest Access (Video)")
     st.caption(
@@ -290,7 +375,7 @@ def render_guest_upload():
     ]
 
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
         add_log(DB_PATH, "INFO", f"Guest video processed: {guest_name} id={gid}. extractor_ok.")
     except subprocess.CalledProcessError as e:
         # Cleanup partial folder if extraction failed
@@ -333,12 +418,30 @@ def render_guest_upload():
     st.rerun()
 
 
+def render_selected_page():
+    selected_page = st.session_state.get("selected_page", "Alerts")
+    if selected_page == "Alerts":
+        st.title("Hostel Security Dashboard")
+        st.caption("No live camera feed shown. Alerts are updated in real time.")
+        render_alerts()
+    elif selected_page == "Real-time Log":
+        st.title("Hostel Security Dashboard")
+        st.caption("No live camera feed shown. Text logs are updated in real time.")
+        render_logs()
+    elif selected_page == "Temp Guest Upload":
+        st.title("Hostel Security Dashboard")
+        st.caption("No live camera feed shown. Manage temporary guest uploads.")
+        render_guest_upload()
+
 
 def main():
+    st.set_page_config(page_title="Hostel Security", layout="wide")
+
     # Ensure DB exists
     init_db(DB_PATH)
 
-    st.set_page_config(page_title="Hostel Security", layout="wide")
+    _init_session()
+    apply_theme()
 
     # Login gate
     if not check_login():
@@ -349,19 +452,7 @@ def main():
     # Auto refresh dashboard
     st_autorefresh(interval=AUTO_REFRESH_MS, key="dash_refresh")
 
-    st.title("Hostel Security Dashboard")
-    st.caption("No live camera feed shown. Alerts + logs are updated in real time.")
-
-    colA, colB = st.columns([2.2, 1.0])
-
-    with colA:
-        render_alerts()
-
-    with colB:
-        render_logs()
-
-    st.divider()
-    render_guest_upload()
+    render_selected_page()
 
 
 if __name__ == "__main__":
