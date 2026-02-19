@@ -152,7 +152,7 @@
 
 <div style="border:1px solid #ddd; border-radius:10px; padding:12px; background:#fafafa;">
   <p style="margin-top:0;">
-    <b>Important:</b> Add at least <b>2 known identities</b> in <code>data/known/</code> before running.
+    <b>Important:</b> Add at least <b>2 known identities</b> in <code>data/known/</code> before running (Read tips given below to make the process faster).
     Each identity should be a folder named after the person, containing multiple clear face images.
   </p>
 
@@ -172,7 +172,14 @@ cd hostel-security-assistance</code></pre>
 <h3>2) Install dependencies</h3>
 <pre><code>pip install -r requirements.txt</code></pre>
 
-<!-- ADD THIS SECTION below Quick Start in your README -->
+<h3>3) Follow Camera connection steps given below.</h3>
+
+<h3>4) Start camera workers</h3>
+<pre><code>python run_workers.py</code></pre>
+
+<h3>5) Start the dashboard (ID passwords are in activation.txt file)</h3>
+<pre><code>streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+</code></pre>
 
 <hr/>
 
@@ -224,13 +231,6 @@ exit_url  = "http://192.168.1.105:8080/video"</code></pre>
 <p>
 And save the file.
 </p>
-
-<h3>3) Start camera workers</h3>
-<pre><code>python run_workers.py</code></pre>
-
-<h3>4) Start the dashboard (ID passwords are in activation.txt file)</h3>
-<pre><code>streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
-</code></pre>
 
 <hr/>
 
