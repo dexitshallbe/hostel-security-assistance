@@ -225,6 +225,13 @@ exit_url  = "http://192.168.1.105:8080/video"</code></pre>
 And save the file.
 </p>
 
+<h3>3) Start camera workers</h3>
+<pre><code>python run_workers.py</code></pre>
+
+<h3>4) Start the dashboard (ID passwords are in activation.txt file)</h3>
+<pre><code>streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+</code></pre>
+
 <hr/>
 
 <h2>🎥 Pro Tip: Easy Face Data Collection</h2>
@@ -272,14 +279,6 @@ This makes permanent identity creation much easier and faster.
   <li>Use stable WiFi to avoid stream drops.</li>
   <li>More face angles = better recognition accuracy.</li>
 </ul>
-
-
-<h3>3) Start camera workers</h3>
-<pre><code>python run_workers.py</code></pre>
-
-<h3>4) Start the dashboard (ID passwords are in activation.txt file)</h3>
-<pre><code>streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
-</code></pre>
 
 <!-- ADD THIS SECTION below the Dashboard or Camera Setup section -->
 
