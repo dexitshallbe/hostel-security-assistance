@@ -172,12 +172,177 @@ cd hostel-security-assistance</code></pre>
 <h3>2) Install dependencies</h3>
 <pre><code>pip install -r requirements.txt</code></pre>
 
+<!-- ADD THIS SECTION below Quick Start in your README -->
+
+<hr/>
+
+<h2>📱 Camera Setup Using Smartphones (No CCTV Required)</h2>
+
+<p>
+If you do not have CCTV cameras, you can use <b>two smartphones</b> as live IP cameras.
+One phone will act as the <b>Entry Camera</b> and the other as the <b>Exit Camera</b>.
+</p>
+
+<h3>Step 1 – Install IP Camera App</h3>
+<ol>
+  <li>Download <b>"IP Camera"</b> from the Google Play Store on both smartphones.</li>
+  <li>Ensure both phones are connected to the <b>same WiFi network</b> as your computer.</li>
+</ol>
+
+<h3>Step 2 – Start Local Broadcasting</h3>
+<ol>
+  <li>Open the IP Camera app.</li>
+  <li>Select <b>Local Broadcasting</b>.</li>
+  <li>The app will display streaming URLs.</li>
+</ol>
+
+<p>Example URL shown in the app:</p>
+
+<pre><code>http://100.89.173.243:8080</code></pre>
+
+<h3>Step 3 – Use Video Stream URL</h3>
+
+<p>
+To use this with the system, append <code>/video</code> to the URL:
+</p>
+
+<pre><code>http://100.89.173.243:8080/video</code></pre>
+
+<h3>Step 4 – Update Camera URLs</h3>
+
+<p>Open <code>run_workers.py</code> and replace the following values:</p>
+
+<pre><code>entry_url = "YOUR_ENTRY_CAMERA_LINK"
+exit_url  = "YOUR_EXIT_CAMERA_LINK"</code></pre>
+
+<p>Example:</p>
+
+<pre><code>entry_url = "http://100.89.173.243:8080/video"
+exit_url  = "http://192.168.1.105:8080/video"</code></pre>
+
+<p>
+Now save the file and run:
+</p>
+
+<pre><code>python run_workers.py</code></pre>
+
+<hr/>
+
+<h2>🎥 Pro Tip: Easy Face Data Collection</h2>
+
+<p>
+Instead of manually taking multiple photos for each person, you can use this faster method:
+</p>
+
+<ol>
+  <li>Record a short <b>5–10 second video</b> of your face using your phone.</li>
+  <li>Move your head slightly (left, right, up, down) for different angles.</li>
+  <li>Run the system.</li>
+  <li>Open the Streamlit dashboard.</li>
+  <li>Go to the <b>Guest Data Upload</b> page.</li>
+  <li>Upload a frame/image from that video.</li>
+</ol>
+
+<p>
+The system will automatically:
+</p>
+
+<ul>
+  <li>Create structured face data inside <code>data/guests/</code></li>
+  <li>Generate processed face images</li>
+  <li>Store embeddings properly</li>
+</ul>
+
+<p>
+Once satisfied, you can move that person's folder from:
+</p>
+
+<pre><code>data/guests/ → data/known/</code></pre>
+
+<p>
+This makes permanent identity creation much easier and faster.
+</p>
+
+<hr/>
+
+<h2>⚠️ Important Tips for Best Performance</h2>
+
+<ul>
+  <li>Ensure good lighting on the face.</li>
+  <li>Keep camera at eye level for better accuracy.</li>
+  <li>Use stable WiFi to avoid stream drops.</li>
+  <li>More face angles = better recognition accuracy.</li>
+</ul>
+
+
 <h3>3) Start camera workers</h3>
 <pre><code>python run_workers.py</code></pre>
 
 <h3>4) Start the dashboard (ID passwords are in activation.txt file)</h3>
-<pre><code>streamlit run streamlit_app.py --server.address 127.0.0.1 --server.port 8501
+<pre><code>streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
 </code></pre>
+
+<!-- ADD THIS SECTION below the Dashboard or Camera Setup section -->
+
+<hr/>
+
+<h2>🌐 Access Dashboard From Any Device (Same WiFi Network)</h2>
+
+<p>
+You are not limited to viewing the dashboard on the same computer running the system.
+Any device connected to the <b>same local network (same WiFi)</b> can access it.
+</p>
+
+<h3>Step 1 – Find Your PC’s IP Address</h3>
+
+<p><b>On Windows:</b></p>
+<pre><code>ipconfig</code></pre>
+
+<p><b>On Linux / macOS:</b></p>
+<pre><code>ifconfig</code></pre>
+
+<p>
+Look for your local IPv4 address.  
+Example:
+</p>
+
+<pre><code>192.168.1.42</code></pre>
+
+<h3>Step 2 – Open Dashboard From Another Device</h3>
+
+<p>
+On any phone, tablet, or laptop connected to the same WiFi,
+open a browser and enter:
+</p>
+
+<pre><code>http://&lt;PC-IP-ADDRESS&gt;:8501</code></pre>
+
+<p>Example:</p>
+
+<pre><code>http://192.168.1.42:8501</code></pre>
+
+<p>
+The Streamlit dashboard will open in the browser.
+</p>
+
+<h3>⚠️ Important</h3>
+<ul>
+  <li>The PC running the system must remain ON.</li>
+  <li>Streamlit must be running.</li>
+  <li>All devices must be on the same local network.</li>
+</ul>
+
+<p>
+This allows security staff to monitor alerts from:
+</p>
+
+<ul>
+  <li>Mobile phones</li>
+  <li>Tablets</li>
+  <li>Other laptops</li>
+  <li>Control room systems</li>
+</ul>
+
 
 <hr/>
 
