@@ -193,6 +193,7 @@ One phone will act as the <b>Entry Camera</b> and the other as the <b>Exit Camer
 <ol>
   <li>Open the IP Camera app.</li>
   <li>Select <b>Local Broadcasting</b>.</li>
+  <li>Click on the three dots on the top right corner and click <b>Start server</b>.</li>
   <li>The app will display streaming URLs.</li>
 </ol>
 
