@@ -222,10 +222,8 @@ exit_url  = "YOUR_EXIT_CAMERA_LINK"</code></pre>
 exit_url  = "http://192.168.1.105:8080/video"</code></pre>
 
 <p>
-Now save the file and run:
+And save the file.
 </p>
-
-<pre><code>python run_workers.py</code></pre>
 
 <hr/>
 
